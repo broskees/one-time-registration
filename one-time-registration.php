@@ -2,6 +2,7 @@
 /**
  * Plugin Name: One Time Registration
  * Description: Easily generate one time registration URLs
+ * Plugin URI: https://github.com/broskees/one-time-registration/
  * Version: 1.0.0
  * Author: Digital Joe
  * Author URI: https://digitaljoe.agency
@@ -10,7 +11,7 @@
  */
 
 if (!defined('ABSPATH')) {
-	die();
+    die();
 }
 
 $config = [
@@ -105,15 +106,16 @@ class OneTimeRegistration
                 jQuery(document).ready(function($) {
                     const
                         data = {'action': 'generate_token'},
-                        button = document.querySelector('#generate-url') || false,
+                        genButton = document.querySelector('#generate-url') || false,
                         input = document.querySelector('#generated-url') || false,
-                        errorSpace = document.querySelector('#error-space') || false;
+                        errorSpace = document.querySelector('#error-space') || false,
+                        copyButton = document.querySelector('#copy-url') || false;
 
-                    if (!button || !input || !errorSpace) {
+                    if (!copyButton || !input || !errorSpace || !genButton) {
                         return;
                     }
 
-                    button.addEventListener('click', event => {
+                    genButton.addEventListener('click', event => {
                         jQuery.post(
                             ajaxurl,
                             data,
@@ -125,6 +127,11 @@ class OneTimeRegistration
                                 input.value = response;
                             }
                         );
+                    });
+
+                    copyButton.addEventListener('click', event => {
+                        input.select();
+                        document.execCommand('copy');
                     });
                 });
             </script>
