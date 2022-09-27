@@ -14,7 +14,7 @@ At the moment I'm not going to bother with versions and such for this.
 
 To install  or add the following to the `repositories` section of your composer.json file:
 
-```
+```json
     {
       "type": "package",
       "package": {
