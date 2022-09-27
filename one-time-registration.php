@@ -27,25 +27,31 @@ class OneTimeRegistration
     private $plugin_slug;
     private $filterHookPrefix;
     private $textdomain;
+    private $errors;
 
     public function __construct($config)
     {
         $this->plugin_slug = $config['plugin_slug'];
         $this->db_version = $config['db_version'];
         $this->textdomain = $config['textdomain'];
+        $this->errors = null;
         $this->initialize();
     }
 
     public function initialize()
     {
+        // Core functionality
         register_activation_hook(__FILE__, [$this, 'install']);
         add_action('plugins_loaded', [$this, 'db_check']);
         add_action('init', [$this, 'handle_token']);
         add_action('admin_footer', [$this, 'admin_script']);
         add_action('wp_ajax_generate_token', [$this, 'generate_and_save_token']);
         add_action('admin_menu', [$this, 'create_admin_page']);
+
+        // Error handling
         add_action($this->plugin_slug . '_not_valid', [$this, 'do_error']);
         add_action($this->plugin_slug . '_no_token', [$this, 'do_error']);
+        add_action($this->plugin_slug . '_unable_to_delete_token', [$this, 'do_error']);
     }
 
     public function install()
@@ -183,44 +189,19 @@ class OneTimeRegistration
 
         // handle submissions
         if (!empty($_POST['token']) && $post_token = $_POST['token']) {
-            // remove token
-            if ($this->check_if_token_is_valid($post_token)) {
-                $wpdb->delete($table_name, ['token' => $post_token], ['%s']);
-            } else {
-                $error = apply_filters(
-                    $this->plugin_slug . '_invalid_post_token_error', 
-                    __('Nice Try.', $this->textdomain)
-                );
-                do_action($this->plugin_slug . '_invalid_post_token', $error);
+            if ($this->handle_submission($post_token)) {
+                return;
             }
-            return;
         }
-
-        do_action($this->plugin_slug . '_before_token_check');
 
         // check the token
-        if (empty($_GET['token'])) {
-            $error = apply_filters(
-                $this->plugin_slug . '_no_token_error', 
-                __('No token was provided', $this->textdomain)
-            );
-            do_action($this->plugin_slug . '_no_token', $error);
+        if ($this->check_token($_GET)) {
             return;
         }
 
-        do_action($this->plugin_slug . '_token_present');
-
-        // is token valid
-        $token = $_GET['token'];
-        $isTokenValid = $this->check_if_token_is_valid($token);
-
-        if (!$isTokenValid) {
-            $error = apply_filters(
-                $this->plugin_slug . '_no_token_error', 
-                __('Token is not valid', $this->textdomain)
-            );
-            do_action($this->plugin_slug . '_not_valid', $error);
-            return;
+        // jump ship if errors
+        if (is_wp_error($this->errors)) {
+            $this->error_and_quit();
         }
 
         // allow to proceed with registration
@@ -230,7 +211,7 @@ class OneTimeRegistration
         add_action('register_form', function () use ($token) {
             echo sprintf(
                 '<input type="hidden" name="token" value="%s" />',
-                $this->build_registration_url($token)
+                $token
             );
         });
     }
@@ -260,8 +241,93 @@ class OneTimeRegistration
         return $isTokenValid;
     }
 
-    public function do_error($error)
+    private function handle_submission($token)
     {
-        wp_die($error);
+        if (!$this->check_if_token_is_valid($post_token)) {
+            do_action(
+                $this->plugin_slug . '_invalid_post_token', 
+                apply_filters(
+                    $this->plugin_slug . '_invalid_post_token_error', 
+                    __('Nice Try.', $this->textdomain)
+                )
+            );
+            return false;
+        }
+
+        $table_name = $wpdb->prefix . $this->plugin_slug;
+        $result = $wpdb->delete($table_name, ['token' => $post_token], ['%s']);
+
+        if (!$result) {
+            do_action(
+                $this->plugin_slug . '_unable_to_delete_token', 
+                apply_filters(
+                    $this->plugin_slug . '_unable_to_delete_token_error', 
+                    __('Unable to delete token', $this->textdomain)
+                )
+            );
+
+            return false;
+        }
+
+        return true;
+    }
+
+    private function check_token($get_params)
+    {
+        do_action($this->plugin_slug . '_before_token_check');
+
+        if (empty($get_params['token'])) {
+            do_action(
+                $this->plugin_slug . '_no_token', 
+                apply_filters(
+                    $this->plugin_slug . '_no_token_error', 
+                    __('No token was provided', $this->textdomain)
+                )
+            );
+            return false;
+        }
+
+        do_action($this->plugin_slug . '_token_present');
+
+        // is token valid
+        $token = $_GET['token'];
+        $isTokenValid = $this->check_if_token_is_valid($token);
+
+        if (!$isTokenValid) {
+            do_action(
+                $this->plugin_slug . '_not_valid',
+                apply_filters(
+                    $this->plugin_slug . '_no_token_error', 
+                    __('Token is not valid', $this->textdomain)
+                )
+            );
+            return false;
+        }
+
+        return true;
+    }
+
+    public function do_error($error_message, $code = 503)
+    {
+        is_wp_error($this->errors)
+            ? $this->errors->add($code, $error_message) 
+            : $this->errors = new WP_Error($code, $error_message);
+    }
+
+    private function error_and_quit()
+    {
+        if (!is_wp_error($this->errors)) {
+            return;
+        }
+
+        $error_messages = $this->errors->get_error_messages();
+        $output = implode('\n', array_map(
+            function($error_message) {
+                return sprintf('<p>%s</p>', $error_message);
+            },
+            $error_messages
+        ));
+
+        wp_die($output);
     }
 }
